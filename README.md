@@ -8,6 +8,12 @@
 
 <br/>
 
+<img src="image/NewsFlow.png" alt="NewsFlow project preview" width="900" />
+
+<p><em>At a glance: AI-powered news collection, clustering, and summarization for developers.</em></p>
+
+<br/>
+
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
