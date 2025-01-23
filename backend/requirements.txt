@@ -1,0 +1,48 @@
+# FastAPI and Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
+supabase
+psycopg2-binary==2.9.9
+asyncpg==0.29.0
+
+# HTTP and Crawling
+httpx
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+feedparser==6.0.11
+newspaper3k==0.2.8
+playwright==1.41.0
+
+# AI and ML
+google-generativeai==0.3.2
+groq>=0.4.0
+sentence-transformers==2.3.1
+hdbscan==0.8.33
+scikit-learn==1.4.0
+numpy==1.26.3
+
+# Text Processing
+nltk==3.8.1
+spacy==3.7.2
+langdetect==1.0.9
+
+# Utilities
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+structlog==24.1.0
+python-dateutil==2.8.2
+croniter==2.0.1
+
+# Testing
+pytest
+pytest-asyncio
+
+# Development
+black==24.1.1
+flake8==7.0.0
+mypy==1.8.0

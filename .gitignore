@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+backend/venv/
+backend/.venv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.env
+backend/.env
+
+# Next.js
+frontend/.next/
+frontend/out/
+.next/
+out/
+.vercel
+
+# Logs and debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log.*
+
+# OS and IDE
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.sublime-*
+
+# Testing and coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+coverage/
+*.cover
+.hypothesis/
+frontend/coverage/
+
+# Misc
+*.bak
+*.tmp
+.cache/
