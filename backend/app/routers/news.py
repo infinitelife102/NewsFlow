@@ -4,10 +4,13 @@ NewsFlow News Router
 API endpoints for news article operations.
 """
 
+import asyncio
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query, HTTPException, status
+from fastapi import APIRouter, Query, HTTPException
+from starlette import status as http_status
 import structlog
 
 from app.database import db
@@ -34,31 +37,24 @@ async def list_articles(
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     source: Optional[str] = Query(None, description="Filter by source"),
     cluster_id: Optional[UUID] = Query(None, description="Filter by cluster"),
-    status: str = Query("active", description="Article status")
+    article_status: str = Query("active", alias="status", description="Article status"),
 ):
     """
     List news articles with pagination and filtering.
-    
-    Returns a paginated list of articles with optional filtering by source,
-    cluster, or status.
+    Content is truncated to ~250 chars for fast list loading.
     """
+    start = datetime.utcnow()
     try:
         offset = (page - 1) * per_page
 
-        total = await db.get_articles_count(
-            status=status,
-            cluster_id=cluster_id,
-            source=source,
-        )
-        # Single JOIN query: articles + clusters + summaries (faster than 4 round-trips)
-        articles = await db.get_articles_with_cluster_summary(
-            status=status,
-            cluster_id=cluster_id,
-            source=source,
-            limit=per_page,
-            offset=offset,
-            order_by="published_at",
-            descending=True,
+        total, articles = await asyncio.gather(
+            asyncio.to_thread(
+                db._get_articles_count_sync, article_status, cluster_id, source
+            ),
+            asyncio.to_thread(
+                db._get_articles_list_sync,
+                article_status, cluster_id, source, per_page, offset,
+            ),
         )
 
         total_pages = max(1, (total + per_page - 1) // per_page)
@@ -69,15 +65,19 @@ async def list_articles(
             total_pages=total_pages
         )
 
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        if duration_ms > 500:
+            logger.info("list_articles_slow", duration_ms=duration_ms, total=total)
+
         return ArticlesListResponse(
             data=articles,
             meta=meta
         )
-    
+
     except Exception as e:
         logger.error("list_articles_failed", error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch articles: {str(e)}"
         )
 
@@ -94,7 +94,7 @@ async def get_article(article_id: UUID):
         
         if not article:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Article {article_id} not found"
             )
         
@@ -105,7 +105,7 @@ async def get_article(article_id: UUID):
     except Exception as e:
         logger.error("get_article_failed", article_id=article_id, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch article: {str(e)}"
         )
 
@@ -113,15 +113,15 @@ async def get_article(article_id: UUID):
 @router.post("/{article_id}/summarize")
 async def summarize_article(article_id: UUID):
     """
-    Generate AI summary for this article and save to article.summary.
-    Use from Articles view to summarize a single article.
-    Returns only success and summary text; client should refetch list to see updated article.
+    Generate AI summary for this article only (path param) and save to article.summary.
+    Request body is ignored; only the article_id in the URL is used.
+    Use from Articles view: one card = one article. For multiple articles use POST /admin/summarize-articles.
     """
     try:
         summary = await summarizer_service.summarize_article(article_id)
         if summary is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Could not generate summary (check Gemini API or article content)"
             )
         return {"success": True, "summary": summary}
@@ -130,7 +130,7 @@ async def summarize_article(article_id: UUID):
     except Exception as e:
         logger.error("summarize_article_failed", article_id=article_id, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
 
@@ -144,7 +144,7 @@ async def update_article(article_id: UUID, body: ArticleUpdate):
         article = await db.get_article_by_id(article_id)
         if not article:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Article {article_id} not found"
             )
         updates = body.model_dump(exclude_unset=True)
@@ -153,7 +153,7 @@ async def update_article(article_id: UUID, body: ArticleUpdate):
         updated = await db.update_article(article_id, updates)
         if not updated:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to update article"
             )
         normalized = _normalize_article(updated) if updated else article
@@ -163,7 +163,7 @@ async def update_article(article_id: UUID, body: ArticleUpdate):
     except Exception as e:
         logger.error("update_article_failed", article_id=article_id, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
 
@@ -180,7 +180,7 @@ async def delete_article(article_id: UUID):
         article = await db.get_article_by_id(article_id)
         if not article:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Article {article_id} not found"
             )
         
@@ -189,7 +189,7 @@ async def delete_article(article_id: UUID):
         
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete article"
             )
         
@@ -205,7 +205,7 @@ async def delete_article(article_id: UUID):
     except Exception as e:
         logger.error("delete_article_failed", article_id=article_id, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete article: {str(e)}"
         )
 
@@ -225,14 +225,14 @@ async def find_similar_articles(
         article = await db.get_article_by_id(article_id)
         if not article:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Article {article_id} not found"
             )
         
         embedding = article.get("embedding")
         if not embedding:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Article has no embedding for similarity search"
             )
         
@@ -261,7 +261,7 @@ async def find_similar_articles(
     except Exception as e:
         logger.error("find_similar_failed", article_id=article_id, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to find similar articles: {str(e)}"
         )
 
@@ -306,6 +306,6 @@ async def search_articles(request: SearchRequest):
     except Exception as e:
         logger.error("search_failed", error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}"
         )

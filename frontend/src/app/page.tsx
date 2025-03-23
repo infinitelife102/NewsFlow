@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast, Toaster } from "sonner";
 
@@ -31,8 +31,13 @@ import {
 } from "@/lib/api";
 import type { Article, Cluster } from "@/types";
 
-const CRAWL_POLL_INTERVAL_MS = 2500;
-const TASK_POLL_INTERVAL_MS = 2500;
+const CRAWL_POLL_INTERVAL_MS = 1500;
+const TASK_POLL_INTERVAL_MS = 1500;
+
+function formatDuration(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${ms}ms`;
+}
 
 export default function HomePage() {
   const queryClient = useQueryClient();
@@ -44,6 +49,14 @@ export default function HomePage() {
   const [crawlInProgress, setCrawlInProgress] = useState(false);
   const [clusterInProgress, setClusterInProgress] = useState(false);
   const [runAllInProgress, setRunAllInProgress] = useState(false);
+
+  // Prevent duplicate "finished" toasts (e.g. strict mode or rapid poll)
+  const crawlFinishedToastShown = useRef(false);
+  const clusterFinishedToastShown = useRef(false);
+  const runAllFinishedToastShown = useRef(false);
+  const crawlStartTime = useRef<number>(0);
+  const clusterStartTime = useRef<number>(0);
+  const runAllStartTime = useRef<number>(0);
 
   // ============================================
   // DATA FETCHING
@@ -62,7 +75,7 @@ export default function HomePage() {
     queryFn: () => fetchArticles(page, PER_PAGE, undefined, clusterFilterId ?? undefined),
     retry: 2,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
-    staleTime: 30 * 1000, // 30s: revisiting same page uses cache, faster
+    staleTime: 5 * 1000, // 5s so UI stays in sync with DB after Fetch News / Delete
   });
 
   const {
@@ -73,6 +86,7 @@ export default function HomePage() {
     queryKey: ["clusters", page],
     queryFn: () => fetchClusters(page, 20),
     enabled: viewMode === "clusters",
+    staleTime: 5 * 1000,
   });
 
   const {
@@ -82,6 +96,8 @@ export default function HomePage() {
   } = useQuery({
     queryKey: ["stats"],
     queryFn: fetchStats,
+    staleTime: 0, // always refetch so article/cluster counts are accurate
+    refetchOnWindowFocus: true,
   });
 
   const articles = Array.isArray(articlesData?.data) ? articlesData.data : [];
@@ -97,6 +113,8 @@ export default function HomePage() {
   const crawlMutation = useMutation({
     mutationFn: triggerCrawl,
     onSuccess: () => {
+      crawlFinishedToastShown.current = false;
+      crawlStartTime.current = Date.now();
       setCrawlInProgress(true);
       toast.info("Fetching news…", { description: "List will update when finished." });
     },
@@ -107,24 +125,34 @@ export default function HomePage() {
     },
   });
 
-  // Poll crawl status until finished; then show one message and refresh the list
+  // Poll crawl status until finished; keep loading state until data arrives
   useEffect(() => {
     if (!crawlInProgress) return;
+    let cancelled = false;
 
     const poll = async () => {
       try {
-        const status = await fetchCrawlStatus();
-        if (!status.running) {
-          setCrawlInProgress(false);
+        const st = await fetchCrawlStatus();
+        if (!st.running && !cancelled) {
+          // Data refetch first, THEN remove loading state so user never sees "No articles yet"
           setPage(1);
           queryClient.invalidateQueries({ queryKey: ["articles"] });
-          await queryClient.refetchQueries({ queryKey: ["articles"] });
-          await refetchStats();
-          const freshStats = await fetchStats();
-          const total = freshStats?.articles?.total ?? 0;
-          toast.success("Crawl finished", {
-            description: `${total} article(s). List updated.`,
-          });
+          queryClient.invalidateQueries({ queryKey: ["stats"] });
+          await Promise.all([
+            queryClient.refetchQueries({ queryKey: ["articles"] }),
+            queryClient.refetchQueries({ queryKey: ["stats"] }),
+          ]);
+          // Now articles are in cache — safe to stop loading
+          setCrawlInProgress(false);
+          const cached = queryClient.getQueryData<{ articles?: { total?: number } }>(["stats"]);
+          const total = cached?.articles?.total ?? 0;
+          const elapsed = Date.now() - crawlStartTime.current;
+          if (!crawlFinishedToastShown.current) {
+            crawlFinishedToastShown.current = true;
+            toast.success("Crawl finished", {
+              description: `${total} article(s) · ${formatDuration(elapsed)}`,
+            });
+          }
           return;
         }
       } catch {
@@ -134,22 +162,32 @@ export default function HomePage() {
 
     const id = setInterval(poll, CRAWL_POLL_INTERVAL_MS);
     poll();
-    return () => clearInterval(id);
-  }, [crawlInProgress, queryClient, refetchStats]);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [crawlInProgress, queryClient]);
 
-  // Poll cluster status until finished, then refetch clusters and stats
+  // Poll cluster status; keep loading until data arrives
   useEffect(() => {
     if (!clusterInProgress) return;
+    let cancelled = false;
     const poll = async () => {
       try {
-        const status = await fetchClusterStatus();
-        if (!status.running) {
-          setClusterInProgress(false);
+        const st = await fetchClusterStatus();
+        if (!st.running && !cancelled) {
           setViewMode("clusters");
           queryClient.invalidateQueries({ queryKey: ["clusters"] });
-          await queryClient.refetchQueries({ queryKey: ["clusters"] });
-          refetchStats();
-          toast.success("Clustering finished", { description: "Switched to Clusters tab." });
+          queryClient.invalidateQueries({ queryKey: ["stats"] });
+          await Promise.all([
+            queryClient.refetchQueries({ queryKey: ["clusters"] }),
+            queryClient.refetchQueries({ queryKey: ["stats"] }),
+          ]);
+          setClusterInProgress(false);
+          const elapsed = Date.now() - clusterStartTime.current;
+          if (!clusterFinishedToastShown.current) {
+            clusterFinishedToastShown.current = true;
+            toast.success("Clustering finished", {
+              description: `Switched to Clusters tab · ${formatDuration(elapsed)}`,
+            });
+          }
           return;
         }
       } catch {
@@ -158,26 +196,38 @@ export default function HomePage() {
     };
     const id = setInterval(poll, TASK_POLL_INTERVAL_MS);
     poll();
-    return () => clearInterval(id);
-  }, [clusterInProgress, queryClient, refetchStats]);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [clusterInProgress, queryClient]);
 
-  // When Run All is in progress, poll until crawl + cluster are both finished
+  // Run All: poll until both done; keep loading until data arrives
   useEffect(() => {
     if (!runAllInProgress) return;
+    let cancelled = false;
     const poll = async () => {
       try {
         const [crawl, cluster] = await Promise.all([
           fetchCrawlStatus(),
           fetchClusterStatus(),
         ]);
-        if (!crawl.running && !cluster.running) {
+        if (!crawl.running && !cluster.running && !cancelled) {
+          queryClient.invalidateQueries({ queryKey: ["articles"] });
+          queryClient.invalidateQueries({ queryKey: ["clusters"] });
+          queryClient.invalidateQueries({ queryKey: ["stats"] });
+          await Promise.all([
+            queryClient.refetchQueries({ queryKey: ["articles"] }),
+            queryClient.refetchQueries({ queryKey: ["clusters"] }),
+            queryClient.refetchQueries({ queryKey: ["stats"] }),
+          ]);
           setRunAllInProgress(false);
           setCrawlInProgress(false);
           setClusterInProgress(false);
-          queryClient.invalidateQueries({ queryKey: ["articles"] });
-          queryClient.invalidateQueries({ queryKey: ["clusters"] });
-          refetchStats();
-          toast.success("Run All finished", { description: "Crawl → Cluster completed." });
+          const elapsed = Date.now() - runAllStartTime.current;
+          if (!runAllFinishedToastShown.current) {
+            runAllFinishedToastShown.current = true;
+            toast.success("Run All finished", {
+              description: `Crawl → Cluster completed · ${formatDuration(elapsed)}`,
+            });
+          }
           return;
         }
       } catch {
@@ -186,12 +236,14 @@ export default function HomePage() {
     };
     const id = setInterval(poll, TASK_POLL_INTERVAL_MS);
     poll();
-    return () => clearInterval(id);
-  }, [runAllInProgress, queryClient, refetchStats]);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [runAllInProgress, queryClient]);
 
   const clusterMutation = useMutation({
     mutationFn: triggerClustering,
     onSuccess: () => {
+      clusterFinishedToastShown.current = false;
+      clusterStartTime.current = Date.now();
       setClusterInProgress(true);
       toast.success("Clustering started", {
         description: "Grouping similar articles...",
@@ -207,14 +259,11 @@ export default function HomePage() {
   const runAllMutation = useMutation({
     mutationFn: runFullPipeline,
     onSuccess: () => {
+      runAllFinishedToastShown.current = false;
+      runAllStartTime.current = Date.now();
       toast.success("Pipeline started", {
         description: "Running: crawl → cluster",
       });
-      setTimeout(() => {
-        refetchStats();
-        queryClient.invalidateQueries({ queryKey: ["articles"] });
-        queryClient.invalidateQueries({ queryKey: ["clusters"] });
-      }, 20000);
     },
     onError: (error: any) => {
       toast.error("Pipeline failed", {
@@ -223,26 +272,42 @@ export default function HomePage() {
     },
   });
 
+  /** Instantly patch the stats cache so badge updates without waiting for API */
+  const patchStats = useCallback(
+    (patch: { articlesDelta?: number; articlesTotal?: number; clustersDelta?: number; clustersTotal?: number }) => {
+      queryClient.setQueryData(["stats"], (old: any) => {
+        if (!old) return old;
+        const arts = old.articles?.total ?? 0;
+        const cls = old.clusters?.active ?? 0;
+        return {
+          ...old,
+          articles: { ...old.articles, total: patch.articlesTotal ?? Math.max(0, arts + (patch.articlesDelta ?? 0)) },
+          clusters: { ...old.clusters, active: patch.clustersTotal ?? Math.max(0, cls + (patch.clustersDelta ?? 0)) },
+        };
+      });
+    },
+    [queryClient]
+  );
+
   const deleteArticleMutation = useMutation({
     mutationFn: deleteArticle,
-    onSuccess: async () => {
+    onSuccess: () => {
+      patchStats({ articlesDelta: -1 });
+      queryClient.invalidateQueries({ queryKey: ["articles"] });
       toast.success("Article deleted");
-      await queryClient.refetchQueries({ queryKey: ["articles"] });
-      await queryClient.refetchQueries({ queryKey: ["stats"] });
     },
     onError: (error: any) => {
-      toast.error("Failed to delete article", {
-        description: error.message,
-      });
+      toast.error("Failed to delete article", { description: error.message });
     },
   });
 
   const deleteBatchMutation = useMutation({
     mutationFn: deleteArticlesBatch,
-    onSuccess: async (data, variables) => {
-      toast.success(`Deleted ${data.deleted} article(s)`);
-      await queryClient.refetchQueries({ queryKey: ["articles"] });
-      await queryClient.refetchQueries({ queryKey: ["stats"] });
+    onSuccess: (data: { deleted: number; duration_ms?: number }) => {
+      patchStats({ articlesDelta: -data.deleted });
+      queryClient.invalidateQueries({ queryKey: ["articles"] });
+      const time = data.duration_ms != null ? ` · ${formatDuration(data.duration_ms)}` : "";
+      toast.success(`Deleted ${data.deleted} article(s)${time}`);
     },
     onError: (error: any) => {
       toast.error("Delete failed", { description: (error as Error)?.message });
@@ -251,10 +316,11 @@ export default function HomePage() {
 
   const deleteAllMutation = useMutation({
     mutationFn: deleteAllArticles,
-    onSuccess: async (data) => {
-      toast.success(`Deleted ${data.deleted} article(s)`);
-      await queryClient.refetchQueries({ queryKey: ["articles"] });
-      await queryClient.refetchQueries({ queryKey: ["stats"] });
+    onSuccess: (data: { deleted: number; duration_ms?: number }) => {
+      patchStats({ articlesTotal: 0 });
+      queryClient.invalidateQueries({ queryKey: ["articles"] });
+      const time = data.duration_ms != null ? ` · ${formatDuration(data.duration_ms)}` : "";
+      toast.success(`Deleted ${data.deleted} article(s). DB cleared.${time}`);
     },
     onError: (error: any) => {
       toast.error("Delete all failed", { description: (error as Error)?.message });
@@ -264,26 +330,25 @@ export default function HomePage() {
   const deleteClusterMutation = useMutation({
     mutationFn: deleteCluster,
     onSuccess: () => {
-      toast.success("Cluster deleted");
+      patchStats({ clustersDelta: -1 });
       queryClient.invalidateQueries({ queryKey: ["clusters"] });
-      refetchStats();
+      toast.success("Cluster deleted");
     },
     onError: (error: any) => {
-      toast.error("Failed to delete cluster", {
-        description: error.message,
-      });
+      toast.error("Failed to delete cluster", { description: error.message });
     },
   });
 
   const resetClusteringMutation = useMutation({
     mutationFn: resetClustering,
-    onSuccess: (data) => {
-      toast.success("Clustering reset", {
-        description: `${data.articles_updated} articles unassigned, ${data.clusters_deleted} clusters removed. You can run Cluster again.`,
-      });
+    onSuccess: (data: { articles_updated: number; clusters_deleted: number; duration_ms?: number }) => {
+      patchStats({ clustersTotal: 0 });
       queryClient.invalidateQueries({ queryKey: ["articles"] });
       queryClient.invalidateQueries({ queryKey: ["clusters"] });
-      refetchStats();
+      const time = data.duration_ms != null ? ` · ${formatDuration(data.duration_ms)}` : "";
+      toast.success("Clustering reset", {
+        description: `${data.articles_updated} articles unassigned, ${data.clusters_deleted} clusters removed${time}`,
+      });
     },
     onError: (error: any) => {
       toast.error("Reset failed", { description: error.message });
@@ -338,10 +403,19 @@ export default function HomePage() {
 
   const handleSummarizeArticle = useCallback(
     async (articleId: string) => {
-      setSummarizingArticleId(articleId);
+      // Only single-article summarize from card (POST /news/:id/summarize), never batch
+      const id = typeof articleId === "string" && articleId && !articleId.includes(",")
+        ? articleId
+        : null;
+      if (!id) {
+        toast.error("Invalid request", { description: "Only one article can be summarized at a time from the card." });
+        return;
+      }
+      setSummarizingArticleId(id);
       try {
-        await summarizeArticle(articleId);
+        await summarizeArticle(id); // single-article API only
         queryClient.invalidateQueries({ queryKey: ["articles"] });
+        queryClient.refetchQueries({ queryKey: ["articles"] }); // keep UI in sync with DB
         toast.success("Article summarized", {
           description: "The summary appears under the title on the card.",
         });
@@ -391,7 +465,8 @@ export default function HomePage() {
   // RENDER
   // ============================================
 
-  const isLoading = isLoadingArticles || isLoadingClusters;
+  // Show spinner on initial load OR when refetching after crawl/delete (so user never sees stale empty state)
+  const isLoading = isLoadingArticles || isLoadingClusters || (isFetchingArticles && articles.length === 0);
   const error = articlesError || clustersError;
 
   return (

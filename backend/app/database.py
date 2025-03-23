@@ -4,6 +4,7 @@ NewsFlow Database Module
 Supabase client and database operations.
 """
 
+import asyncio
 import json
 from typing import List, Optional, Dict, Any
 from uuid import UUID
@@ -128,6 +129,55 @@ class Database:
             logger.error("get_article_by_url_failed", error=str(e), url=url)
             return None
 
+    async def get_existing_urls(self, urls: List[str]) -> set:
+        """Return set of URLs that already exist in DB (for batch dedup)."""
+        if not urls:
+            return set()
+        try:
+            # Supabase .in_() has limit; chunk if needed
+            existing = set()
+            chunk_size = 100
+            for i in range(0, len(urls), chunk_size):
+                chunk = urls[i : i + chunk_size]
+                result = self.client.table("articles")\
+                    .select("url")\
+                    .in_("url", chunk)\
+                    .execute()
+                for row in (result.data or []):
+                    if row.get("url"):
+                        existing.add(row["url"])
+            return existing
+        except Exception as e:
+            logger.error("get_existing_urls_failed", error=str(e))
+            return set()
+
+    async def insert_articles_batch(self, articles: List[Dict[str, Any]]) -> int:
+        """Insert multiple articles in one or more chunks. Returns count inserted."""
+        if not articles:
+            return 0
+        inserted = 0
+        chunk_size = 20
+        for i in range(0, len(articles), chunk_size):
+            chunk = articles[i : i + chunk_size]
+            payloads = []
+            for article in chunk:
+                payload = dict(article)
+                if not (payload.get("content") or "").strip():
+                    payload["content"] = " "
+                emb = payload.get("embedding")
+                if isinstance(emb, str):
+                    try:
+                        payload["embedding"] = json.loads(emb)
+                    except (json.JSONDecodeError, TypeError):
+                        payload.pop("embedding", None)
+                payloads.append(_serialize_for_db(payload))
+            try:
+                result = self.client.table("articles").insert(payloads).execute()
+                inserted += len(result.data) if result.data else 0
+            except Exception as e:
+                logger.error("insert_articles_batch_chunk_failed", error=str(e))
+        return inserted
+
     async def get_article_by_id(self, article_id: UUID) -> Optional[Dict]:
         """Get article by ID."""
         try:
@@ -143,41 +193,38 @@ class Database:
     
     _ARTICLE_COLUMNS_NO_EMBEDDING = "id,title,content,url,source,author,published_at,keywords,summary,cluster_id,status,created_at,updated_at"
 
-    # Single-query select: articles + clusters (JOIN, no summaries table)
-    _ARTICLE_SELECT_WITH_CLUSTER = (
-        "id,title,content,url,source,author,published_at,keywords,summary,cluster_id,status,created_at,updated_at,"
+    # List view: no embedding, no content (summary only; content stays in DB for summarization)
+    _ARTICLE_LIST_COLS = (
+        "id,title,url,source,author,published_at,keywords,summary,"
+        "cluster_id,status,created_at,updated_at,"
         "clusters(name,article_count)"
     )
 
-    async def get_articles_with_cluster_summary(
+    def _get_articles_list_sync(
         self,
         status: str = "active",
         cluster_id: Optional[UUID] = None,
         source: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-        order_by: str = "published_at",
-        descending: bool = True,
     ) -> List[Dict]:
-        """
-        Get articles with cluster data in one query (JOIN). No summaries.
-        Returns cluster_name, cluster_size; ai_summary and ai_key_points are always empty.
-        """
+        """Sync list for use with to_thread. No content field — keeps payload small."""
         try:
-            query = self.client.table("articles").select(self._ARTICLE_SELECT_WITH_CLUSTER)
+            query = self.client.table("articles").select(self._ARTICLE_LIST_COLS)
             if status:
                 query = query.eq("status", status)
             if cluster_id:
                 query = query.eq("cluster_id", str(cluster_id))
             if source:
                 query = query.eq("source", source)
-            query = query.order(order_by, desc=descending)
+            query = query.order("created_at", desc=True)
             query = query.range(offset, offset + limit - 1)
             result = query.execute()
             rows = result.data or []
             out = []
             for r in rows:
                 flat = {k: v for k, v in r.items() if k != "clusters"}
+                flat["content"] = " "  # placeholder for Pydantic min_length=1
                 flat = _normalize_article(flat)
                 clusters_row = r.get("clusters") or r.get("cluster")
                 if clusters_row:
@@ -191,7 +238,7 @@ class Database:
                 out.append(flat)
             return out
         except Exception as e:
-            logger.error("get_articles_with_cluster_summary_failed", error=str(e))
+            logger.error("get_articles_list_failed", error=str(e))
             return []
 
     async def get_articles(
@@ -227,13 +274,13 @@ class Database:
             logger.error("get_articles_failed", error=str(e))
             return []
 
-    async def get_articles_count(
+    def _get_articles_count_sync(
         self,
         status: str = "active",
         cluster_id: Optional[UUID] = None,
         source: Optional[str] = None,
     ) -> int:
-        """Get total count of articles with same filters as get_articles (for pagination)."""
+        """Sync count for use with to_thread (parallel list load)."""
         try:
             query = self.client.table("articles").select("*", count="exact", head=True)
             if status:
@@ -247,6 +294,17 @@ class Database:
         except Exception as e:
             logger.error("get_articles_count_failed", error=str(e))
             return 0
+
+    async def get_articles_count(
+        self,
+        status: str = "active",
+        cluster_id: Optional[UUID] = None,
+        source: Optional[str] = None,
+    ) -> int:
+        """Get total count of articles with same filters as get_articles (for pagination)."""
+        return await asyncio.to_thread(
+            self._get_articles_count_sync, status, cluster_id, source
+        )
 
     async def update_article(
         self, 
@@ -263,6 +321,22 @@ class Database:
         except Exception as e:
             logger.error("update_article_failed", error=str(e), article_id=article_id)
             return None
+
+    async def update_articles_cluster_batch(
+        self, article_ids: List[UUID], cluster_id: UUID
+    ) -> int:
+        """Set cluster_id for multiple articles in one query. Returns number updated."""
+        if not article_ids:
+            return 0
+        try:
+            result = self.client.table("articles")\
+                .update({"cluster_id": str(cluster_id)})\
+                .in_("id", [str(aid) for aid in article_ids])\
+                .execute()
+            return len(result.data) if result.data else 0
+        except Exception as e:
+            logger.error("update_articles_cluster_batch_failed", error=str(e))
+            return 0
     
     async def delete_article(self, article_id: UUID) -> bool:
         """Soft delete an article."""
@@ -291,10 +365,10 @@ class Database:
             return 0
 
     async def delete_all_active_articles(self) -> int:
-        """Soft delete all active articles. Returns count of updated rows (best effort)."""
+        """Hard delete all active articles from DB so table is empty. Returns count deleted."""
         try:
             result = self.client.table("articles")\
-                .update({"status": "deleted"})\
+                .delete()\
                 .eq("status", "active")\
                 .execute()
             return len(result.data) if result.data else 0
@@ -570,28 +644,22 @@ class Database:
     # STATISTICS
     # ============================================
     
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get database statistics."""
+    def _get_stats_sync(self) -> Dict[str, Any]:
+        """Sync stats for fast parallel count + crawl."""
         try:
-            # Get article count (active only; deleted are excluded from UI count)
             articles_result = self.client.table("articles")\
                 .select("id", count="exact")\
                 .eq("status", "active")\
                 .execute()
-            
-            # Get cluster count
             clusters_result = self.client.table("clusters")\
                 .select("id", count="exact")\
                 .eq("status", "active")\
                 .execute()
-            
-            # Get recent crawl stats
             crawl_result = self.client.table("crawl_history")\
                 .select("*")\
                 .order("started_at", desc=True)\
                 .limit(5)\
                 .execute()
-            
             return {
                 "articles": {"total": articles_result.count or 0},
                 "clusters": {"active": clusters_result.count or 0},
@@ -604,6 +672,10 @@ class Database:
                 "clusters": {"active": 0},
                 "recent_crawls": []
             }
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get database statistics (article/cluster counts + recent crawls)."""
+        return await asyncio.to_thread(self._get_stats_sync)
 
 
 # Global database instance

@@ -84,7 +84,9 @@ export function NewsCard({ article, onDelete, onSummarize, showClusterInfo, isSu
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={async () => {
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   setSummarizing(true);
                   try {
                     await onSummarize(article.id);
@@ -93,7 +95,7 @@ export function NewsCard({ article, onDelete, onSummarize, showClusterInfo, isSu
                   }
                 }}
                 disabled={summarizingAny}
-                title={article.summary ? "Re-summarize this article only" : "Generate AI summary for this article only (not the whole list)"}
+                title={article.summary ? "Re-summarize this article only" : "Summarize this article only (1 article)"}
               >
                 <Sparkles className={`h-4 w-4 ${summarizingAny ? "animate-pulse" : ""}`} />
               </Button>
@@ -142,9 +144,9 @@ export function NewsCard({ article, onDelete, onSummarize, showClusterInfo, isSu
           </div>
         )}
 
-        {!article.summary && article.content && (
-          <p className="text-sm text-muted-foreground mb-3 line-clamp-3">
-            {truncateText(article.content, 200)}
+        {!article.summary && (
+          <p className="text-sm text-muted-foreground mb-3 italic">
+            No summary yet — click <Sparkles className="h-3.5 w-3.5 inline" /> to generate
           </p>
         )}
 

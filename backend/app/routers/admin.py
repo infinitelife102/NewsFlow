@@ -47,10 +47,13 @@ async def get_stats():
     
     Returns counts of articles, clusters, summaries, and recent crawl history.
     """
+    start = datetime.utcnow()
     try:
         stats = await db.get_stats()
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        if duration_ms > 500:
+            logger.info("get_stats_slow", duration_ms=duration_ms)
         return StatsResponse(data=stats)
-    
     except Exception as e:
         logger.error("get_stats_failed", error=str(e))
         raise HTTPException(
@@ -122,7 +125,7 @@ async def trigger_crawl(
 
 
 async def _run_crawl_task(request: CrawlRequest):
-    """Background task for crawling. Do not close the global crawler client here (app lifespan closes it on shutdown)."""
+    """Background task for crawling. Batch: URL dedup, batch embed, batch insert. No per-article quick summary."""
     global _crawl_running
     _crawl_running = True
     start_time = datetime.utcnow()
@@ -130,50 +133,37 @@ async def _run_crawl_task(request: CrawlRequest):
     try:
         logger.info("crawl_task_started", source=request.source)
 
-        # Crawl articles (use global crawler; client must not be closed after each run)
+        # 1. Crawl articles (use global crawler)
         articles = await crawler.crawl_all(limit=request.limit)
+        if not articles:
+            logger.info("crawl_task_complete", articles_found=0, articles_added=0, duration_ms=0)
+            return
 
-        # Process and store articles
-        added_count = 0
-        errors = []
+        # 2. Batch duplicate check: one DB call for all URLs
+        urls = [a.get("url") for a in articles if a.get("url")]
+        existing_urls = await db.get_existing_urls(urls)
+        new_articles = [a for a in articles if a.get("url") and a["url"] not in existing_urls]
 
-        for article_data in articles:
-            try:
-                # Check for duplicates
-                existing = await db.get_article_by_url(article_data["url"])
-                if existing:
-                    continue
+        # 3. Normalize content (API/DB require at least 1 char)
+        for a in new_articles:
+            if not (a.get("content") or "").strip():
+                a["content"] = " "
 
-                # API/DB require content length >= 1; avoid empty string
-                if not (article_data.get("content") or "").strip():
-                    article_data["content"] = " "
+        # 4. Batch embedding (single model call for all new articles)
+        if new_articles:
+            texts_for_embed = [
+                f"{a.get('title', '')}. {(a.get('content') or '')[:500]}"
+                for a in new_articles
+            ]
+            embeddings = embedding_service.encode(texts_for_embed)
+            for i, a in enumerate(new_articles):
+                if i < len(embeddings) and embeddings[i]:
+                    a["embedding"] = embeddings[i]
 
-                # Generate embedding (embedding_service accepts empty content)
-                embedding = embedding_service.encode_article(
-                    title=article_data["title"],
-                    content=article_data.get("content") or ""
-                )
-
-                if embedding:
-                    article_data["embedding"] = embedding
-
-                # Create extractive summary
-                if article_data.get("content") and article_data["content"].strip():
-                    article_data["summary"] = await summarizer_service.generate_quick_summary(
-                        article_data["content"],
-                        max_sentences=2
-                    )
-
-                # Insert article (embedding must be list; Supabase may store/return as string, we normalize on read)
-                await db.insert_article(article_data)
-                added_count += 1
-
-            except Exception as e:
-                errors.append(str(e))
-                logger.error("article_insert_failed", error=str(e))
+        # 5. Batch insert (no per-article quick summary during crawl for speed)
+        added_count = await db.insert_articles_batch(new_articles)
 
         duration = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-
         logger.info("crawl_task_complete",
                    articles_found=len(articles),
                    articles_added=added_count,
@@ -248,11 +238,14 @@ async def _run_clustering_task(request: ClusteringRequest):
 @router.post("/articles/delete-batch")
 async def delete_articles_batch(request: DeleteArticlesRequest):
     """Soft-delete the given articles by ID. Returns count deleted."""
+    start = datetime.utcnow()
     try:
         if not request.article_ids:
-            return {"deleted": 0, "message": "No articles to delete"}
+            return {"deleted": 0, "message": "No articles to delete", "duration_ms": 0}
         count = await db.delete_articles_batch(request.article_ids)
-        return {"deleted": count, "message": f"Deleted {count} article(s)"}
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        logger.info("delete_articles_batch_done", deleted=count, duration_ms=duration_ms)
+        return {"deleted": count, "message": f"Deleted {count} article(s)", "duration_ms": duration_ms}
     except Exception as e:
         logger.error("delete_articles_batch_failed", error=str(e))
         raise HTTPException(
@@ -264,9 +257,12 @@ async def delete_articles_batch(request: DeleteArticlesRequest):
 @router.post("/articles/delete-all")
 async def delete_all_articles():
     """Soft-delete all active articles. Returns count deleted."""
+    start = datetime.utcnow()
     try:
         count = await db.delete_all_active_articles()
-        return {"deleted": count, "message": f"Deleted {count} article(s)"}
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        logger.info("delete_all_articles_done", deleted=count, duration_ms=duration_ms)
+        return {"deleted": count, "message": f"Deleted {count} article(s)", "duration_ms": duration_ms}
     except Exception as e:
         logger.error("delete_all_articles_failed", error=str(e))
         raise HTTPException(
@@ -352,13 +348,17 @@ async def reset_clustering():
     Reset clustering: unassign all articles from clusters, delete all summaries and clusters.
     Use this before re-running Cluster so that all articles are considered unclustered again.
     """
+    start = datetime.utcnow()
     try:
         result = await db.reset_clustering()
+        duration_ms = int((datetime.utcnow() - start).total_seconds() * 1000)
+        logger.info("reset_clustering_done", duration_ms=duration_ms, **result)
         return {
             "message": "Clustering reset. You can now run Cluster again.",
             "articles_updated": result["articles_updated"],
             "summaries_deleted": result["summaries_deleted"],
             "clusters_deleted": result["clusters_deleted"],
+            "duration_ms": duration_ms,
         }
     except Exception as e:
         logger.error("reset_clustering_failed", error=str(e))

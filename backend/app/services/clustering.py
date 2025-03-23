@@ -142,13 +142,9 @@ class ClusteringService:
             
             if cluster:
                 clusters_created += 1
-                
-                # Assign articles to cluster
-                for article in cluster_articles:
-                    await db.update_article(
-                        article["id"],
-                        {"cluster_id": cluster["id"]}
-                    )
+                # Assign all articles to this cluster in one query (was N round-trips)
+                article_ids = [a["id"] for a in cluster_articles]
+                await db.update_articles_cluster_batch(article_ids, cluster["id"])
         
         duration = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         

@@ -231,15 +231,21 @@ CLUSTER_SIMILARITY_THRESHOLD=0.85
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
+## ⚡ Performance
+
+- **Fetch News**: Crawl uses batch URL dedup, batch embedding, and batch insert. List API runs count + list in parallel (thread pool) so the UI appears faster after crawl ends.
+- **Clustering**: Articles are assigned to clusters in one batch update per cluster (no N round-trips).
+- **Delete all**: Hard-deletes active articles from the DB (rows removed), so the table is actually empty. Stats and list refresh immediately.
+- **UI vs DB**: Articles/clusters use 5s `staleTime`; stats use `staleTime: 0` and refetch after mutations so counts stay accurate.
+- **Single-article summarize**: Only the card button calls `POST /news/:id/summarize`; list is refetched after so the UI matches the DB.
+- **Measure**: Run `node scripts/perf-test.mjs` (backend must be running) to print API response times.
+
 ## 📚 Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) - Detailed system architecture
 - [API Documentation](docs/API.md) - API endpoints and usage
 - [Setup Guide](docs/SETUP.md) - Detailed setup instructions
 - [Clustering Guide](docs/CLUSTERING_GUIDE.md) - Cluster setup: DB, config, and workflow
-
-- [Clustering Guide](docs/CLUSTERING_GUIDE.md) - 클러스터 분류: DB/설정/절차 (한국어)
-- [Clustering Guide](docs/CLUSTERING_GUIDE.md) - 클러스터 분류: DB/설정/절차 (한국어)
 
 ## 🛠️ Tech Stack
 
