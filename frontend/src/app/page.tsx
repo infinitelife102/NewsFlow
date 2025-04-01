@@ -46,6 +46,7 @@ export default function HomePage() {
   const [page, setPage] = useState(1);
   const [clusterFilterId, setClusterFilterId] = useState<string | null>(null);
   const [summarizingArticleId, setSummarizingArticleId] = useState<string | null>(null);
+  const [summarizeVisibleInProgress, setSummarizeVisibleInProgress] = useState(false);
   const [crawlInProgress, setCrawlInProgress] = useState(false);
   const [clusterInProgress, setClusterInProgress] = useState(false);
   const [runAllInProgress, setRunAllInProgress] = useState(false);
@@ -401,6 +402,7 @@ export default function HomePage() {
     resetClusteringMutation.mutate();
   }, [resetClusteringMutation]);
 
+  // 기사 카드에서 요약(Sparkles) 클릭 시: 이 기사만 동기로 요약 → API 완료 후 articles refetch → 카드에 summary 표시
   const handleSummarizeArticle = useCallback(
     async (articleId: string) => {
       // Only single-article summarize from card (POST /news/:id/summarize), never batch
@@ -426,14 +428,38 @@ export default function HomePage() {
     [queryClient]
   );
 
-  const handleSummarizeVisibleArticles = useCallback(() => {
+  const handleSummarizeVisibleArticles = useCallback(async () => {
     if (articles.length === 0) {
       toast.info("No articles on this page to summarize");
       return;
     }
-    summarizeArticles(articles.map((a) => a.id));
-    toast.success(`Summarizing ${articles.length} article(s) in background. Refresh the list to see updates.`);
-  }, [articles]);
+    const ids = articles.map((a) => a.id);
+    setSummarizeVisibleInProgress(true);
+    try {
+      await summarizeArticles(ids);
+      toast.success(`Summarizing ${ids.length} article(s) in background. List will update as summaries complete.`);
+      // Poll so list and stats refresh as summaries complete (backend runs in background)
+      const pollIntervalMs = 5000;
+      const pollDurationMs = 90 * 1000;
+      const tid = setInterval(() => {
+        queryClient.invalidateQueries({ queryKey: ["articles"] });
+        queryClient.invalidateQueries({ queryKey: ["stats"] });
+        refetchArticles();
+        refetchStats();
+      }, pollIntervalMs);
+      setTimeout(() => {
+        clearInterval(tid);
+        setSummarizeVisibleInProgress(false);
+        queryClient.invalidateQueries({ queryKey: ["articles"] });
+        queryClient.invalidateQueries({ queryKey: ["stats"] });
+        refetchArticles();
+        refetchStats();
+      }, pollDurationMs);
+    } catch (e: any) {
+      toast.error("Summarize failed", { description: e?.message || "Could not start summarization" });
+      setSummarizeVisibleInProgress(false);
+    }
+  }, [articles, queryClient, refetchArticles, refetchStats]);
 
   const handleDeleteVisibleArticles = useCallback(() => {
     if (articles.length === 0) {
@@ -465,9 +491,20 @@ export default function HomePage() {
   // RENDER
   // ============================================
 
-  // Show spinner on initial load OR when refetching after crawl/delete (so user never sees stale empty state)
-  const isLoading = isLoadingArticles || isLoadingClusters || (isFetchingArticles && articles.length === 0);
-  const error = articlesError || clustersError;
+  // Show spinner on initial load OR when moving modes. (Removed isFetchingArticles so it doesn't spin on focus)
+  const isLoading = viewMode === "articles" ? isLoadingArticles : isLoadingClusters;
+  const error = viewMode === "articles" ? articlesError : clustersError;
+
+  // Derive counts using meta when available so it updates instantly with the list
+  const currentArticleCount =
+    viewMode === "articles" && !clusterFilterId && articlesMeta
+      ? articlesMeta.total
+      : stats?.articles?.total;
+
+  const currentClusterCount =
+    viewMode === "clusters" && clustersData?.meta
+      ? clustersData.meta.total
+      : stats?.clusters?.active;
 
   return (
     <div className="min-h-screen bg-background">
@@ -490,8 +527,8 @@ export default function HomePage() {
         isClustering={clusterMutation.isPending || clusterInProgress}
         isRunningAll={runAllMutation.isPending || runAllInProgress}
         isResettingClustering={resetClusteringMutation.isPending}
-        articleCount={stats?.articles.total}
-        clusterCount={stats?.clusters.active}
+        articleCount={currentArticleCount}
+        clusterCount={currentClusterCount}
       />
 
       <main className="container mx-auto px-4 py-6">
@@ -514,6 +551,13 @@ export default function HomePage() {
           <div className="mb-4 flex items-center gap-2 rounded-lg border bg-primary/10 px-4 py-3 text-sm text-foreground">
             <Loader2 className="h-4 w-4 animate-spin shrink-0" />
             <span>Run All in progress: Fetch News → Cluster. This may take a few minutes.</span>
+          </div>
+        )}
+        {/* Summarize visible in progress banner */}
+        {summarizeVisibleInProgress && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border bg-primary/10 px-4 py-3 text-sm text-foreground">
+            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+            <span>Summarizing visible articles in background… List and counts will refresh automatically.</span>
           </div>
         )}
         {/* Deleting in progress banner */}
