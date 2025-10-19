@@ -13,7 +13,7 @@ import structlog
 
 from app.config import settings
 from app.database import db
-from app.routers import news_router, clusters_router, admin_router
+from app.routers import news_router, clusters_router, admin_router, chat_router
 from app.models import HealthResponse, HealthStatus
 
 # Configure structured logging
@@ -101,6 +101,7 @@ app.add_middleware(
 app.include_router(news_router)
 app.include_router(clusters_router)
 app.include_router(admin_router)
+app.include_router(chat_router)
 
 
 @app.get("/", tags=["root"])

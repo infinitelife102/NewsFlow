@@ -122,7 +122,7 @@ async def summarize_article(article_id: UUID):
         if summary is None:
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Could not generate summary (check Gemini API or article content)"
+                detail="Could not generate summary (check OPENROUTER_API_KEY or article content)"
             )
         return {"success": True, "summary": summary}
     except HTTPException:

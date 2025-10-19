@@ -9,6 +9,7 @@ import { ActionBar } from "@/components/ActionBar";
 import { NewsCard } from "@/components/NewsCard";
 import { ClusterCard } from "@/components/ClusterCard";
 import { AdminPanel } from "@/components/AdminPanel";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { Button } from "@/components/ui/Button";
 import { Loader2, AlertCircle, ArrowLeft } from "lucide-react";
 
@@ -402,7 +403,7 @@ export default function HomePage() {
     resetClusteringMutation.mutate();
   }, [resetClusteringMutation]);
 
-  // 기사 카드에서 요약(Sparkles) 클릭 시: 이 기사만 동기로 요약 → API 완료 후 articles refetch → 카드에 summary 표시
+  // When Sparkles is clicked on an article card: summarize that article synchronously, refetch articles after the API returns, then show summary on the card.
   const handleSummarizeArticle = useCallback(
     async (articleId: string) => {
       // Only single-article summarize from card (POST /news/:id/summarize), never batch
@@ -733,6 +734,8 @@ export default function HomePage() {
         stats={stats}
         isLoading={isLoadingStats}
       />
+
+      <ChatWidget />
     </div>
   );
 }

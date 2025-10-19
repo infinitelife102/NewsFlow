@@ -5,10 +5,10 @@ Data validation and serialization models for the API.
 """
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 # ============================================
@@ -348,6 +348,42 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseResponse):
     """Search response."""
     data: List[SearchResult]
+
+
+# ============================================
+# CHAT MODELS (OpenRouter FAB assistant)
+# ============================================
+
+class ChatHistoryMessage(BaseModel):
+    """One turn in the chat history (text-only for past turns; media is top-level on request)."""
+    role: Literal["user", "assistant"]
+    text: str = ""
+
+
+class ChatRequest(BaseModel):
+    """Chat completion request: conversation + optional images (data URLs) and/or voice (base64)."""
+    messages: List[ChatHistoryMessage] = Field(..., min_length=1, max_length=64)
+    images: Optional[List[str]] = Field(None, description="data:image/...;base64,... URLs for the latest user turn")
+    audio_base64: Optional[str] = Field(None, description="Raw base64 audio bytes (no data: prefix)")
+    audio_mime: Optional[str] = Field("audio/webm", description="MIME type for Whisper upload filename hint")
+
+    @field_validator("images")
+    @classmethod
+    def cap_images(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        return v[:24]
+
+
+class ChatResultData(BaseModel):
+    """Assistant reply text."""
+    message: str
+    model: str
+
+
+class ChatResponse(BaseResponse):
+    """Chat completion response."""
+    data: ChatResultData
 
 
 # ============================================

@@ -39,9 +39,41 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = Field(..., description="Supabase anon key")
     SUPABASE_SERVICE_KEY: str = Field(..., description="Supabase service role key")
     
-    # AI APIs (summarization uses Groq only)
-    GROQ_API_KEY: Optional[str] = Field(None, description="Groq API key (free tier: Llama models)")
-    GROQ_MODEL: str = Field("llama-3.1-8b-instant", description="Groq model for summarization")
+    # AI APIs — OpenRouter (OpenAI-compatible, free models: https://openrouter.ai/models?free=true )
+    OPENROUTER_API_KEY: Optional[str] = Field(None, description="OpenRouter API key")
+    OPENROUTER_BASE_URL: str = Field(
+        "https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL",
+    )
+    OPENROUTER_HTTP_REFERER: Optional[str] = Field(
+        None,
+        description="Optional public site URL (OpenRouter rankings / attribution)",
+    )
+    # Default: Llama 3.3 8B free — solid for JSON-style cluster summaries
+    OPENROUTER_MODEL: str = Field(
+        "meta-llama/llama-3.3-8b-instruct:free",
+        description="Summarization + default text chat model id",
+    )
+    # Free pool router — picks a free vision-capable model when user sends images only
+    OPENROUTER_CHAT_VISION_MODEL: str = Field(
+        "openrouter/free",
+        description="Chat model when images are attached (no audio)",
+    )
+    # Nemotron 3 Nano Omni: text + image + video + audio per OpenRouter / NVIDIA docs
+    OPENROUTER_CHAT_AUDIO_MODEL: str = Field(
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        description="Chat when voice is attached (input_audio); also used when both images and audio",
+    )
+    OPENROUTER_CHAT_TEXT_MODEL: Optional[str] = Field(
+        None,
+        description="Text-only chat override; defaults to OPENROUTER_MODEL",
+    )
+    CHAT_MAX_MESSAGES: int = Field(32, ge=1, le=64, description="Max chat messages in one request")
+    CHAT_MAX_TOKENS: int = Field(2048, ge=256, le=8192)
+    CHAT_MAX_KEYFRAMES: int = Field(5, ge=1, le=8, description="Max images per request (video keyframes + uploads)")
+    CHAT_MAX_IMAGE_BYTES: int = Field(4_194_304, description="Max decoded bytes per image")
+    CHAT_MAX_AUDIO_BYTES: int = Field(8_388_608, description="Max decoded bytes for voice clip upload")
+    CHAT_TEMPERATURE: float = Field(0.6, ge=0.0, le=2.0)
     
     # News Sources
     NEWSAPI_KEY: Optional[str] = Field(None, description="NewsAPI key")
@@ -55,7 +87,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_DIMENSION: int = 384
     
-    # Summarization (Groq)
+    # Summarization (OpenRouter)
     SUMMARY_MAX_TOKENS: int = 1024
     SUMMARY_TEMPERATURE: float = 0.3
     
@@ -85,9 +117,9 @@ class Settings(BaseSettings):
         return bool(self.SUPABASE_URL and self.SUPABASE_SERVICE_KEY)
     
     @property
-    def groq_enabled(self) -> bool:
-        """Check if Groq API is configured."""
-        return bool(self.GROQ_API_KEY)
+    def openrouter_enabled(self) -> bool:
+        """Check if OpenRouter API is configured."""
+        return bool(self.OPENROUTER_API_KEY)
     
     @property
     def newsapi_enabled(self) -> bool:
