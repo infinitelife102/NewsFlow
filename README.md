@@ -53,7 +53,7 @@
 
 ![Summarizing](image/summarizing.png)
 
-> Watch articles get summarized in real-time by Groq's **Llama 3.1** model. The spinner shows active generation with streaming output.
+> Watch articles get summarized via **OpenRouter** free models (configurable, e.g. Llama 3.3 8B instruct). The UI shows progress while the API completes.
 
 ---
 
@@ -80,7 +80,7 @@
 - ✅ Multi-source news crawling pipeline
 - ✅ Vector embedding generation (384-dim)
 - ✅ HDBSCAN clustering algorithm
-- ✅ LLM integration (Groq Llama 3.1)
+- ✅ LLM integration (OpenRouter — free models, OpenAI-compatible API)
 - ✅ PostgreSQL + pgvector hybrid DB
 - ✅ Row-Level Security (RLS) policies
 - ✅ Structured logging with structlog
@@ -96,6 +96,7 @@
 - ✅ Infinite scroll + pagination
 - ✅ Tailwind CSS + shadcn/ui components
 - ✅ Toast notifications + loading states
+- ✅ In-app chat FAB (OpenRouter: text, images, short voice)
 - ✅ Admin panel with live statistics
 
 </td>
@@ -127,9 +128,12 @@
 ║                                 ▼                                             ║
 ║   🤖 AI PROCESSING LAYER                                                      ║
 ║   ┌──────────────────────┐  ┌──────────────────────┐  ┌────────────────────┐  ║
-║   │   Groq API (FREE)    │→ │  Summarizer Engine   │→ │  Developer-format  │  ║
-║   │  Llama 3.1-8b-instant│  │  (prompt engineering)│  │  key_points/impact │  ║
+║   │   OpenRouter API     │→ │  Summarizer Engine   │→ │  Developer-format  │  ║
+║   │  (free models / chat)│  │  (prompt engineering)│  │  key_points/impact │  ║
 ║   └──────────────────────┘  └──────────────────────┘  └────────────────────┘  ║
+║   ┌──────────────────────┐                                                  ║
+║   │  POST /api/v1/chat   │ ← FAB assistant (text · images · voice)           ║
+║   └──────────────────────┘                                                  ║
 ║                                 ▼                                             ║
 ║   🗄️ STORAGE LAYER (Supabase — PostgreSQL + pgvector)                        ║
 ║   ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌────────────────────────────┐ ║
@@ -168,7 +172,7 @@
 | 🔍 Vectors | **pgvector** + IVFFlat | Hybrid relational + vector search |
 | 🕷️ Crawling | **BeautifulSoup4** + feedparser | Lightweight, flexible HTML + RSS parsing |
 | 🧠 Embeddings | **sentence-transformers** | Local, free, 384-dim semantic vectors |
-| 🤖 AI/LLM | **Groq API** (Llama 3.1) | Free tier, fast inference, no credit card |
+| 🤖 AI/LLM | **OpenRouter** ([free models](https://openrouter.ai/models?free=true)) | One API key; summarization + in-app chat |
 | 📊 Clustering | **HDBSCAN** + scikit-learn | No preset K required, handles noise |
 
 </div>
@@ -236,7 +240,7 @@ queryClient.setDefaultOptions({
 | Python | 3.10+ | With pip |
 | Node.js | 18+ | With npm |
 | Supabase account | — | Free tier, no card needed |
-| Groq API key | — | Free tier at [console.groq.com](https://console.groq.com) |
+| OpenRouter API key | — | Free tier models at [openrouter.ai](https://openrouter.ai/) |
 
 ### 1️⃣ Clone & Setup
 
@@ -305,9 +309,12 @@ SUPABASE_URL=https://xxxx.supabase.co
 SUPABASE_KEY=your-anon-key
 SUPABASE_SERVICE_KEY=your-service-role-key
 
-# Groq — Free LLM API  →  https://console.groq.com
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
-GROQ_MODEL=llama-3.1-8b-instant
+# OpenRouter — https://openrouter.ai/keys
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxx
+# Optional overrides (defaults in backend/app/config.py)
+# OPENROUTER_MODEL=meta-llama/llama-3.3-8b-instruct:free
+# OPENROUTER_CHAT_VISION_MODEL=openrouter/free
+# OPENROUTER_CHAT_AUDIO_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
 
 # NewsAPI — Free API  →  https://newsapi.org
 NEWSAPI_KEY=your-newsapi-key
@@ -343,7 +350,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 | Service | Free Limit | Estimated Usage |
 |---------|-----------|----------------|
 | **Supabase** | 500MB DB + 2GB egress | Well within free tier |
-| **Groq API** | 14,400 requests/day | <100 req/day typical |
+| **OpenRouter** | Model-dependent free quotas | Summaries + chat |
 | **NewsAPI** | 100 requests/day | ~10 req/day |
 | **Vercel** (optional) | Generous free tier | $0 |
 | **Railway** (optional) | $5 credit/month | $0 |
@@ -368,10 +375,13 @@ newsflow/
 │   │   │   ├── crawler.py       # Multi-source news crawler
 │   │   │   ├── embedding.py     # sentence-transformers wrapper
 │   │   │   ├── clustering.py    # HDBSCAN + cosine clustering
-│   │   │   └── summarizer.py    # Groq LLM + prompt engineering
+│   │   │   ├── summarizer.py    # OpenRouter LLM + prompt engineering
+│   │   │   ├── chat_service.py # In-app chat (multimodal via OpenRouter)
+│   │   │   └── llm_openrouter.py
 │   │   └── routers/
 │   │       ├── news.py          # /api/v1/news endpoints
 │   │       ├── clusters.py      # /api/v1/clusters endpoints
+│   │       ├── chat.py          # POST /api/v1/chat
 │   │       └── admin.py         # /api/v1/admin endpoints
 │   ├── requirements.txt
 │   └── .env.example
@@ -385,6 +395,8 @@ newsflow/
 │   │   │   ├── ClusterCard.tsx  # Cluster group card
 │   │   │   ├── ActionBar.tsx    # Fetch/Cluster/Run All buttons
 │   │   │   ├── AdminPanel.tsx   # Stats dashboard
+│   │   │   ├── chat/
+│   │   │   │   └── ChatWidget.tsx  # FAB assistant → POST /api/v1/chat
 │   │   │   └── Header.tsx
 │   │   ├── hooks/
 │   │   │   └── useNews.ts       # React Query hooks

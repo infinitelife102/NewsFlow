@@ -29,7 +29,7 @@ For **free backend deployment without a card**, see the [Free deployment guide (
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_KEY=your-anon-key
    SUPABASE_SERVICE_KEY=your-service-role-key
-   GROQ_API_KEY=your-groq-key
+   OPENROUTER_API_KEY=your-openrouter-key
    NEWSAPI_KEY=your-newsapi-key
    APP_ENV=production
    DEBUG=false
@@ -81,7 +81,7 @@ For **free backend deployment without a card**, see the [Free deployment guide (
 ### Backend (Render)
 
 - `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_KEY`
-- `GROQ_API_KEY`, `NEWSAPI_KEY` (optional)
+- `OPENROUTER_API_KEY`, `NEWSAPI_KEY` (optional)
 - `APP_ENV=production`, `DEBUG=false`
 - `CORS_ORIGINS=https://your-app.vercel.app` (your actual frontend URL)
 

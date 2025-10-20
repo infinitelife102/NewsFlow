@@ -428,6 +428,41 @@ Get all articles in a cluster.
 
 ---
 
+### Chat assistant
+
+<a id="chat-assistant"></a>
+
+#### POST /api/v1/chat
+
+In-app assistant (Next.js FAB). Uses **OpenRouter** `chat.completions` with the `openai` Python SDK.
+
+**Request body (JSON):**
+
+| Field | Type | Required | Description |
+|-------|------|------------|-------------|
+| `messages` | array | yes | Conversation turns: `{ "role": "user" \| "assistant", "text": string }`. Last message must be `user`. |
+| `images` | string[] | no | Data URLs (`data:image/...;base64,...`) for the latest user turn (max enforced server-side). |
+| `audio_base64` | string | no | Raw base64 audio (no `data:` prefix). Sent as OpenRouter `input_audio` with `audio_mime` → format mapping. |
+| `audio_mime` | string | no | MIME type hint (e.g. `audio/webm`). Default `audio/webm`. |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Assistant reply text…",
+    "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+  }
+}
+```
+
+**Configuration:** `OPENROUTER_API_KEY` and optional `OPENROUTER_MODEL`, `OPENROUTER_CHAT_VISION_MODEL`, `OPENROUTER_CHAT_AUDIO_MODEL` in `backend/.env`. See `backend/.env.example` and [OpenRouter audio docs](https://openrouter.ai/docs/guides/overview/multimodal/audio).
+
+**Errors:** `503` if OpenRouter key missing; `400` validation; `401`/`429`/`502` mapped from upstream with a readable `detail` string.
+
+---
+
 ### Admin
 
 #### GET /api/v1/admin/stats

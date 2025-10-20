@@ -40,7 +40,7 @@ Raw News Sources
        │
        ▼
 ┌─────────────┐
-│    Groq     │ ← Free tier (Llama models)
+│ OpenRouter  │ ← OpenAI-compatible API; free models (summaries + optional chat)
 │  Summarizer │ ← Developer-focused summaries
 └──────┬──────┘
        │
@@ -190,7 +190,7 @@ Stage 6: Clustering
 
 Stage 7: AI Summarization
 ├── Cluster content aggregation
-├── Groq API call
+├── OpenRouter chat.completions call
 ├── Developer-focused summary
 └── Storage in database
 ```
@@ -265,18 +265,20 @@ update_article_clusters(articles, labels)
 
 ## 5. AI Summarization Strategy
 
-### 5.1 Model Selection: Groq
+### 5.1 Model Selection: OpenRouter
 
-**Why Groq?**
-- Free tier with generous limits (Llama models, e.g. llama-3.1-8b-instant)
-- Fast inference
-- Good quality summaries
-- No credit card required
+**Why OpenRouter?**
+- Access to many **free-tier** models from one API ([openrouter.ai/models?free=true](https://openrouter.ai/models?free=true))
+- **OpenAI-compatible** `chat.completions` endpoint — implemented with the official `openai` Python SDK pointed at `https://openrouter.ai/api/v1`
+- Default summarization model in code: `meta-llama/llama-3.3-8b-instruct:free` (override with `OPENROUTER_MODEL` in `.env`)
 
-**Alternative: Ollama (Local)**
-- Completely free
-- No API limits
-- Requires GPU for speed
+**In-app chat (FAB widget)**
+- `POST /api/v1/chat` — multiturn JSON; optional image data URLs; optional voice as base64 + MIME (sent as OpenRouter [`input_audio`](https://openrouter.ai/docs/guides/overview/multimodal/audio))
+- Model routing (see `backend/app/config.py`): text → `OPENROUTER_MODEL` (or `OPENROUTER_CHAT_TEXT_MODEL`); images only → `OPENROUTER_CHAT_VISION_MODEL`; audio or audio+images → `OPENROUTER_CHAT_AUDIO_MODEL` (default: Nemotron Omni free for multimodal)
+
+**Alternatives**
+- **Other OpenRouter models:** set `OPENROUTER_*` env vars; see OpenRouter model cards for supported modalities
+- **Ollama (local):** not wired in this repo; would require a separate client
 
 ### 5.2 Prompt Engineering
 
@@ -428,7 +430,7 @@ App
 ### 8.1 Environment Variables
 
 All sensitive data in `.env`:
-- API keys (Groq, NewsAPI, Supabase)
+- API keys (OpenRouter, NewsAPI, Supabase)
 - Database credentials
 - Secret tokens
 

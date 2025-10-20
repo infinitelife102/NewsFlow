@@ -20,14 +20,15 @@ Complete step-by-step guide to set up and run NewsFlow locally.
    - `anon public` → `SUPABASE_KEY`
    - `service_role secret` → `SUPABASE_SERVICE_KEY`
 
-### 1.2 Groq (AI Summarization)
+### 1.2 OpenRouter (AI summarization + in-app chat)
 
-1. Go to [Groq Console](https://console.groq.com/)
-2. Sign up or sign in
-3. Create an API key
-4. Copy the key → `GROQ_API_KEY`
+1. Go to [OpenRouter](https://openrouter.ai/) and sign in
+2. Open [API keys](https://openrouter.ai/keys) and create a key
+3. Copy the key → `OPENROUTER_API_KEY` in `backend/.env`
 
-**Free Tier:** Generous limits for Llama models (e.g. `llama-3.1-8b-instant`). No credit card required.
+**Free models:** Browse [Models (free)](https://openrouter.ai/models?free=true). Defaults in code are in `backend/app/config.py` (e.g. `OPENROUTER_MODEL`, `OPENROUTER_CHAT_VISION_MODEL`, `OPENROUTER_CHAT_AUDIO_MODEL`). Copy `backend/.env.example` for all chat-related variables.
+
+**Docs:** [OpenRouter API](https://openrouter.ai/docs), [Audio input (`input_audio`)](https://openrouter.ai/docs/guides/overview/multimodal/audio)
 
 ### 1.3 NewsAPI (News Source) - Optional
 
@@ -103,9 +104,11 @@ Fill in your `.env`:
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-anon-key
 SUPABASE_SERVICE_KEY=your-service-role-key
-GROQ_API_KEY=your-groq-api-key
+OPENROUTER_API_KEY=your-openrouter-key
 NEWSAPI_KEY=your-newsapi-key  # Optional
 ```
+
+See `backend/.env.example` for optional `OPENROUTER_*` model overrides and chat limits.
 
 ### 3.4 Run Backend
 
@@ -248,9 +251,9 @@ uvicorn app.main:app --reload
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-**Problem:** Summarization fails or "Groq API not configured"
+**Problem:** Summarization fails or chat returns "OpenRouter not configured"
 
-**Solution:** Set `GROQ_API_KEY` in `.env` (get a key at [console.groq.com](https://console.groq.com/))
+**Solution:** Set `OPENROUTER_API_KEY` in `backend/.env` (create a key at [openrouter.ai/keys](https://openrouter.ai/keys)), then restart Uvicorn. For chat errors, check `OPENROUTER_CHAT_*` model IDs on the OpenRouter model page.
 
 ### 7.2 Frontend Issues
 
@@ -293,10 +296,13 @@ newsflow/
 │   │   │   ├── crawler.py       # News crawling
 │   │   │   ├── embedding.py     # Vector embeddings
 │   │   │   ├── clustering.py    # Article clustering
-│   │   │   └── summarizer.py    # AI summarization
+│   │   │   ├── summarizer.py    # OpenRouter summarization
+│   │   │   ├── chat_service.py  # OpenRouter in-app chat (+ optional audio)
+│   │   │   └── llm_openrouter.py # Shared OpenRouter client helper
 │   │   └── routers/
 │   │       ├── news.py          # News endpoints
 │   │       ├── clusters.py      # Cluster endpoints
+│   │       ├── chat.py          # POST /api/v1/chat
 │   │       └── admin.py         # Admin endpoints
 │   ├── requirements.txt
 │   └── .env
@@ -327,6 +333,9 @@ newsflow/
 - `GET /api/v1/clusters/{id}` - Get cluster with articles
 - `DELETE /api/v1/clusters/{id}` - Delete cluster
 - `GET /api/v1/clusters/{id}/summary` - Get cluster summary
+
+### Chat assistant
+- `POST /api/v1/chat` - Multiturn assistant (text, optional images, optional voice); see [API.md](API.md#chat-assistant)
 
 ### Admin
 - `GET /api/v1/admin/stats` - System statistics
@@ -387,7 +396,7 @@ Set these in your deployment platform:
 ```env
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
-GROQ_API_KEY=
+OPENROUTER_API_KEY=
 NEWSAPI_KEY=
 APP_ENV=production
 DEBUG=false

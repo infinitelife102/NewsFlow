@@ -74,7 +74,7 @@ app = FastAPI(
     
     - **News Collection**: Automated crawling from multiple sources
     - **Article Clustering**: Group similar articles using vector embeddings
-    - **AI Summarization**: Generate developer-focused summaries with Gemini
+    - **AI Summarization**: Developer-focused summaries via OpenRouter (configurable free models)
     - **Search**: Full-text search across all articles
     
     ## Authentication

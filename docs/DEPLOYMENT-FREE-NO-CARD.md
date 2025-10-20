@@ -66,7 +66,7 @@ pip install -r requirements.txt
 Create `~/NewsFlow/backend/.env` and fill it using your local `backend/.env.example`. At minimum:
 
 - `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_KEY`
-- `GROQ_API_KEY`, `NEWSAPI_KEY` (optional)
+- `OPENROUTER_API_KEY`, `NEWSAPI_KEY` (optional)
 - `APP_ENV=production`, `DEBUG=false`
 - `CORS_ORIGINS=https://your-app.vercel.app` (replace with your Vercel URL later)
 
@@ -138,7 +138,7 @@ Open the Vercel URL in a browser and confirm API calls work.
 
 ## PythonAnywhere free tier limits
 
-- **Outbound HTTP**: Free accounts can only make requests to [whitelisted domains](https://www.pythonanywhere.com/whitelist/). Check whether Supabase, Groq, NewsAPI, etc. are on the list. If not, contact support or consider a paid tier.
+- **Outbound HTTP**: Free accounts can only make requests to [whitelisted domains](https://www.pythonanywhere.com/whitelist/). Check whether Supabase, OpenRouter (`openrouter.ai`), NewsAPI, etc. are on the list. If not, contact support or consider a paid tier.
 - **CPU/memory**: Limits apply; heavy crawling or summarization may hit them.
 - **ASGI**: Beta feature; configuration is CLI-based and may change later.
 

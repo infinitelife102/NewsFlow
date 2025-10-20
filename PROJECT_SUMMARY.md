@@ -47,10 +47,10 @@ NewsFlow is a production-ready AI news aggregation platform that automatically c
 - **Threshold:** Configurable (default 0.85)
 
 ### 5. Free AI Model Recommendation ✅
-- **Primary:** Groq API (Free Tier) – Llama models (e.g. `llama-3.1-8b-instant`)
-  - Generous free tier, no credit card required
-- **Fallback:** Local extractive summarization
-- **Location:** `backend/app/services/summarizer.py`
+- **Primary:** [OpenRouter](https://openrouter.ai/) — free models via OpenAI-compatible `chat.completions` (defaults in `backend/app/config.py`, e.g. `meta-llama/llama-3.3-8b-instruct:free` for `OPENROUTER_MODEL`)
+- **In-app chat:** `POST /api/v1/chat` — text, images, optional voice (`input_audio`); routing via `OPENROUTER_CHAT_VISION_MODEL` / `OPENROUTER_CHAT_AUDIO_MODEL`
+- **Fallback:** Local extractive summarization when the API is unavailable
+- **Location:** `backend/app/services/summarizer.py`, `backend/app/services/chat_service.py`, `backend/app/services/llm_openrouter.py`
 
 ### 6. FastAPI Endpoints ✅
 - **Location:** `backend/app/routers/`
@@ -58,7 +58,7 @@ NewsFlow is a production-ready AI news aggregation platform that automatically c
   - `/api/v1/news` - Article CRUD
   - `/api/v1/clusters` - Cluster management
   - `/api/v1/admin` - Admin operations
-  - `/health` - Health check
+  - `/api/v1/chat` - In-app assistant (OpenRouter)
 - **Documentation:** Auto-generated at `/docs`
 
 ### 7. Next.js UI Components ✅
@@ -68,7 +68,7 @@ NewsFlow is a production-ready AI news aggregation platform that automatically c
   - ClusterCard - Cluster with AI summary
   - ActionBar - Control buttons
   - AdminPanel - Statistics and monitoring
-  - Header - Navigation
+  - ChatWidget - FAB assistant → `/api/v1/chat`
 - **Tech:** Next.js 14, Tailwind CSS, shadcn/ui style
 
 ### 8. Core Function Code ✅
@@ -82,9 +82,8 @@ NewsFlow is a production-ready AI news aggregation platform that automatically c
 
 #### Summarizer (`backend/app/services/summarizer.py`)
 ```python
-# Google Gemini API integration
-# Developer-focused prompt engineering
-# Structured output (summary, key points, impact, use cases)
+# OpenRouter (openai SDK → openrouter.ai/api/v1) for cluster + article summaries
+# Developer-focused prompt engineering; structured JSON for cluster summaries
 ```
 
 #### Clustering (`backend/app/services/clustering.py`)
@@ -184,7 +183,7 @@ npm run dev
 | Service | Key Name | Free Tier | Get Key |
 |---------|----------|-----------|---------|
 | Supabase | SUPABASE_URL, SUPABASE_KEY | 500MB DB | [supabase.com](https://supabase.com) |
-| Groq | GROQ_API_KEY | Generous free tier | [console.groq.com](https://console.groq.com) |
+| OpenRouter | OPENROUTER_API_KEY | Free model tiers | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | NewsAPI | NEWSAPI_KEY | 100 req/day | [newsapi.org](https://newsapi.org) |
 
 ## Key Features
@@ -198,7 +197,7 @@ npm run dev
 ### Processing
 - ✅ Vector embeddings (384-dim, all-MiniLM-L6-v2)
 - ✅ HDBSCAN clustering (dynamic, no preset count)
-- ✅ AI summarization with Gemini
+- ✅ AI summarization with OpenRouter (configurable free models)
 - ✅ Developer-focused output format
 
 ### Storage
@@ -220,7 +219,7 @@ npm run dev
 | Frontend | Next.js 14, React, TypeScript, Tailwind CSS |
 | Backend | Python, FastAPI, Uvicorn |
 | Database | Supabase (PostgreSQL + pgvector) |
-| AI/ML | Google Gemini API, sentence-transformers |
+| AI/ML | OpenRouter API, sentence-transformers |
 | Crawling | BeautifulSoup4, feedparser, httpx |
 | Clustering | HDBSCAN, scikit-learn |
 
@@ -262,7 +261,7 @@ npm run dev
 | Service | Free Limit | Usage Estimate |
 |---------|------------|----------------|
 | Supabase | 500MB, 2GB egress | ~$0/month |
-| Gemini API | 60 req/min | ~$0/month |
+| OpenRouter (free models) | Per-model quotas | ~$0/month typical |
 | NewsAPI | 100 req/day | ~$0/month |
 | Hosting (Vercel/Railway) | Generous limits | ~$0/month |
 
